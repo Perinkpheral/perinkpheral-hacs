@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Setting a screen up: its name, its layout and the display it is for; then what
 stands in every place."""
+import asyncio
 import secrets
 
 import voluptuous as vol
@@ -43,7 +44,7 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
         # is not offered again, under whichever of its names it was given.
         names = {device_key(self._found_device), device_key(discovery_info.hostname)}
         for entry in self._async_current_entries():
-            if (device_key(entry.data.get(CONF_DEVICE, "")) in names
+            if ((not entry.unique_id and device_key(entry.data.get(CONF_DEVICE, "")) in names)
                     or device_key(entry.unique_id or "") in names):
                 self.hass.config_entries.async_update_entry(
                     entry, data={**entry.data, CONF_DEVICE: self._found_device},
@@ -56,6 +57,13 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             return get_url(self.hass, prefer_external=False)
         except NoURLAvailableError:
+            return ""
+
+    async def _legacy_identity(self, device: str) -> str:
+        """A sleeping older display must not prevent pairing another display."""
+        try:
+            return device_key(await get_hostname(self.hass, device))
+        except DeviceError:
             return ""
 
     async def async_step_user(self, user_input=None):
@@ -83,11 +91,12 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
                         known = device_key(entry.unique_id or entry.data.get(CONF_DEVICE, ""))
                         if known == identity:
                             return self.async_abort(reason="already_configured")
-                        # Older manual entries have no identity beyond their address.
-                        if not entry.unique_id and entry.data.get(CONF_DEVICE):
-                            known = device_key(await get_hostname(self.hass, entry.data[CONF_DEVICE]))
-                            if known == identity:
-                                return self.async_abort(reason="already_configured")
+                    # Probe older entries together so their transport timeouts do not add up.
+                    legacy = (self._legacy_identity(entry.data[CONF_DEVICE])
+                              for entry in self._async_current_entries()
+                              if not entry.unique_id and entry.data.get(CONF_DEVICE))
+                    if identity in await asyncio.gather(*legacy):
+                        return self.async_abort(reason="already_configured")
                     await self.async_set_unique_id(identity + ".local.", raise_on_progress=False)
                     self._abort_if_unique_id_configured()
                     self._pairing_device = identity

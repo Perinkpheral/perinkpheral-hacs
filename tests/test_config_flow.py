@@ -177,14 +177,37 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(pushes, [])
 
     def test_discovery_updates_legacy_manual_entry(self):
-        entry = types.SimpleNamespace(unique_id=None, data={"device": "display.local", "secret": "keep"})
+        for address in ("display.local", "192.0.2.42"):
+            with self.subTest(address=address):
+                entry = types.SimpleNamespace(unique_id=None, data={"device": address, "secret": "keep"})
+                ConfigFlow.entries[:] = [entry]
+                result = asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
+                    host="192.0.2.42", hostname="display.local.",
+                )))
+                self.assertEqual(result["type"], "abort")
+                self.assertEqual(entry.data, {"device": "192.0.2.42", "secret": "keep"})
+                self.assertEqual(entry.unique_id, "display.local.")
+
+    def test_reused_ip_does_not_rebind_an_identified_display(self):
+        entry = types.SimpleNamespace(unique_id="first.local.", data={
+            "device": "192.0.2.42", "secret": "keep", "url": "http://ha", "layout": "hero",
+        })
         ConfigFlow.entries.append(entry)
+        original = entry.data.copy()
         result = asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
-            host="192.0.2.42", hostname="display.local.",
+            host="192.0.2.42", hostname="second.local.",
         )))
-        self.assertEqual(result["type"], "abort")
-        self.assertEqual(entry.data, {"device": "192.0.2.42", "secret": "keep"})
-        self.assertEqual(entry.unique_id, "display.local.")
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(entry.unique_id, "first.local.")
+        self.assertEqual(entry.data, original)
+        result = asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
+            host="192.0.2.43", hostname="first.local.",
+        )))
+        self.assertEqual(result, {"type": "abort", "reason": "already_configured"})
+        self.assertEqual(entry.unique_id, "first.local.")
+        self.assertEqual(entry.data, {**original, "device": "192.0.2.43"})
+        self.assertEqual(pushes, [])
+        self.assertEqual(lookups, [])
 
     def test_new_discovery_shows_the_address_without_pairing(self):
         result = asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
@@ -235,17 +258,106 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(ConfigFlow.entries, [])
         self.assertEqual(pushes, [])
 
-    def test_unreachable_legacy_entry_cannot_be_silently_overwritten(self):
-        ConfigFlow.entries.append(types.SimpleNamespace(
-            unique_id=None, data={"device": "192.0.2.42", "secret": "keep"}))
-        async def lookup(hass, device):
-            if device == "192.0.2.42":
-                raise flow.DeviceError("cannot_connect")
-            return "display"
-        flow.get_hostname = lookup
-        result = self.pair("display.local")
-        self.assertEqual(result["errors"], {"base": "cannot_connect"})
-        self.assertEqual(pushes, [])
+    def test_failed_legacy_lookup_does_not_block_a_new_display(self):
+        for reason in ("cannot_connect", "refused"):
+            with self.subTest(reason=reason):
+                ConfigFlow.entries.clear()
+                self.progress.clear()
+                pushes.clear()
+                entry = types.SimpleNamespace(
+                    unique_id=None, data={"device": "192.0.2.42", "secret": "keep"})
+                ConfigFlow.entries.append(entry)
+                async def lookup(hass, device):
+                    if device == "192.0.2.42":
+                        raise flow.DeviceError(reason)
+                    return "display"
+                flow.get_hostname = lookup
+                result = self.pair("display.local")
+                self.assertEqual(result["type"], "create_entry")
+                self.assertEqual(len(ConfigFlow.entries), 2)
+                self.assertEqual(len(pushes), 1)
+                self.assertEqual(pushes[0][0], "display.local")
+                self.assertIsNone(entry.unique_id)
+                self.assertEqual(entry.data, {"device": "192.0.2.42", "secret": "keep"})
+
+    def test_legacy_lookups_run_together_and_still_detect_aliases(self):
+        async def check(matching):
+            addresses = ["192.0.2.41", "192.0.2.42", "192.0.2.43"]
+            ConfigFlow.entries[:] = [types.SimpleNamespace(
+                unique_id=None, data={"device": address, "secret": "keep"}) for address in addresses]
+            started = set()
+            all_started = asyncio.Event()
+
+            async def lookup(hass, device):
+                if device == "display.local":
+                    return "display"
+                started.add(device)
+                if started == set(addresses):
+                    all_started.set()
+                # A serial implementation cannot start all probes before this deadline.
+                await asyncio.wait_for(all_started.wait(), timeout=1)
+                if device != addresses[-1]:
+                    raise flow.DeviceError("cannot_connect")
+                return "display" if matching else "other"
+
+            flow.get_hostname = lookup
+            result = await self.new_flow().async_step_user({
+                "name": "Desk", "layout": "hero", "device": "display.local", "url": "http://ha",
+            })
+            self.assertEqual(started, set(addresses))
+            if matching:
+                self.assertEqual(result, {"type": "abort", "reason": "already_configured"})
+                self.assertEqual(pushes, [])
+                self.assertEqual(len(ConfigFlow.entries), 3)
+            else:
+                self.assertEqual(result["type"], "create_entry")
+                self.assertEqual(len(pushes), 1)
+                self.assertEqual(len(ConfigFlow.entries), 4)
+            self.assertTrue(all(entry.data["secret"] == "keep" and entry.unique_id is None
+                                for entry in ConfigFlow.entries[:3]))
+
+        for matching in (False, True):
+            with self.subTest(matching=matching):
+                pushes.clear()
+                self.progress.clear()
+                asyncio.run(check(matching))
+
+    def test_canceling_legacy_lookups_cancels_all_probes(self):
+        async def check():
+            addresses = {"192.0.2.41", "192.0.2.42"}
+            ConfigFlow.entries[:] = [types.SimpleNamespace(
+                unique_id=None, data={"device": address, "secret": "keep"}) for address in addresses]
+            started, canceled = set(), set()
+            all_started = asyncio.Event()
+
+            async def lookup(hass, device):
+                if device == "display.local":
+                    return "display"
+                started.add(device)
+                if started == addresses:
+                    all_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    canceled.add(device)
+
+            flow.get_hostname = lookup
+            instance = self.new_flow()
+            task = asyncio.create_task(instance.async_step_user({
+                "name": "Desk", "layout": "hero", "device": "display.local", "url": "http://ha",
+            }))
+            try:
+                await asyncio.wait_for(all_started.wait(), timeout=1)
+            finally:
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            self.assertEqual(canceled, addresses)
+            self.assertEqual(instance._pairing_device, "")
+            self.assertEqual(pushes, [])
+            self.assertEqual(len(ConfigFlow.entries), 2)
+
+        asyncio.run(check())
 
     def test_concurrent_pairing_writes_one_secret(self):
         async def check():

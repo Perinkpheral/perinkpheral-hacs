@@ -24,6 +24,11 @@ The integration writes only `server` and `token` to HA Companion. The display
 fetches its screen from Home Assistant. A sensor exposes the screen text in
 Home Assistant; a refresh button requests an update on the display.
 
+Displays are identified by the hostname reported by the firmware, which follows
+the device name. Give each display a distinct name. If a renamed display also
+changes address, remove its old integration entry and pair it again. The firmware
+status API currently provides no stable device ID across renames.
+
 [HA Companion's reference](https://github.com/perinkpheral/perinkpheral-apps/blob/main/apps/ha/README.md)
 describes the screen format rendered by this integration.
 Application code belongs in [perinkpheral-apps](https://github.com/perinkpheral/perinkpheral-apps);
