@@ -24,6 +24,24 @@ class DeviceError(Exception):
     """The display did not take the settings; the text is the reason."""
 
 
+async def get_hostname(hass: HomeAssistant, device: str) -> str:
+    """Read the board's identity before sending it pairing credentials."""
+    address = device if "://" in device else "http://" + device
+    try:
+        async with asyncio.timeout(TIMEOUT_S):
+            async with async_get_clientsession(hass).get(
+                    "%s/api/status" % address.rstrip("/")) as answer:
+                if answer.status != 200:
+                    raise DeviceError("refused")
+                status = await answer.json()
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError) as failure:
+        raise DeviceError("cannot_connect") from failure
+    hostname = status.get("hostname") if isinstance(status, dict) else None
+    if not isinstance(hostname, str) or not hostname.strip():
+        raise DeviceError("cannot_connect")
+    return hostname.strip()
+
+
 async def push_settings(hass: HomeAssistant, device: str, url: str, secret: str) -> None:
     address = device if "://" in device else "http://" + device
     try:

@@ -28,6 +28,8 @@ class ScreenView(HomeAssistantView):
         given = request.headers.get("Authorization", "")
         shown = given[len(BEARER):] if given.startswith(BEARER) else ""
         for entry in self._hass.config_entries.async_entries(DOMAIN):
+            if entry.disabled_by is not None:
+                continue
             secret = entry.data.get(CONF_SECRET, "")
             if secret and shown and hmac.compare_digest(secret.encode(), shown.encode()):
                 screen = render(layout_of(entry), entry.options, self._hass.states.get)

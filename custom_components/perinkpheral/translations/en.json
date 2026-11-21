@@ -11,13 +11,14 @@
           "url": "Home Assistant address, as the display reaches it"
         },
         "data_description": {
-          "device": "192.168.1.70 or perinkpheral.local. Empty: set the display up by hand.",
+          "device": "192.168.1.70 or perinkpheral.local.",
           "url": "With http or https, no path."
         }
       }
     },
     "flow_title": "{name}",
     "error": {
+      "device_required": "Give the display's address.",
       "cannot_connect": "The display did not answer.",
       "app_missing": "Install HA Companion on the display first.",
       "refused": "The display did not take the settings.",

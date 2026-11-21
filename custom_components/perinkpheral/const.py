@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 DOMAIN = "perinkpheral"
 
 CONF_LAYOUT = "layout"
-CONF_DEVICE = "device"  # the display's address on the network; empty: set up by hand
+CONF_DEVICE = "device"  # the display's address on the network
 CONF_URL = "url"        # this Home Assistant's address, as the display reaches it
 CONF_SECRET = "secret"  # what the display shows to be given its screen: made here, never typed
 

@@ -21,8 +21,9 @@ def load(name):
 
 sys.modules["perinkpheral"] = types.ModuleType("perinkpheral")
 sys.modules["perinkpheral"].__path__ = [PACKAGE]
-load("const")
-render = load("render").render
+const = load("const")
+renderer = load("render")
+render = renderer.render
 
 
 class State:
@@ -100,6 +101,46 @@ many = {"row_%d_entity" % n: "sensor.room" for n in range(1, 9)}
 many.update({"row_%d_label" % n: "x" * 200 for n in range(1, 9)})
 long_screen = render("list", many, STATES.get)
 check(len(long_screen.encode()) <= 512 and long_screen.count("\n") == 8, True)
+
+# Invalid numeric readings must leave the other places usable.
+for reading in ("inf", "-inf", "nan", "1e999"):
+    state = State("input_text.reading", reading, unit_of_measurement="°C")
+    check(render("hero", {"hero_entity": state.entity_id}, lambda _: state), "hero|--|")
+    check(render("single", {"value_entity": state.entity_id}, lambda _: state),
+          "layout|single\nitem|Reading||--")
+    check(renderer.whole_number(reading), "--")
+    weather = State("weather.home", "cloudy", temperature=reading)
+    check(render("hero", {"hero_entity": weather.entity_id}, lambda _: weather), "hero|--|cloudy")
+
+for temperature in (None, "bad", [], {}, 10 ** 1000):
+    weather = State("weather.home", "cloudy", temperature=temperature)
+    check(render("hero", {"hero_entity": weather.entity_id}, lambda _: weather), "hero|--|cloudy")
+check(render("hero", {"hero_entity": "binary_sensor.door"}, STATES.get), "hero|off|door")
+
+# Even the first line must fit; use a placeholder instead of a partial reading.
+for reading in ("Я" * 255, "🌡" * 255, "x" * 600):
+    state = State("input_text.reading", reading)
+    check(render("hero", {"hero_entity": state.entity_id}, lambda _: state), "hero|--|")
+
+state = State("sensor.large", "1e308")
+check(render("hero", {"hero_entity": state.entity_id}, lambda _: state),
+      "hero|" + str(round(float(state.state))) + "|")
+
+for size in (505, 506, 507):
+    state = State("input_text.reading", "x" * size)
+    screen = render("hero", {"hero_entity": state.entity_id}, lambda _: state)
+    check(screen, "hero|" + state.state + "|" if size <= 506 else "hero|--|")
+    check(len(screen.encode()) <= const.SCREEN_MAX_BYTES, True)
+
+# Dropping lower lines preserves complete UTF-8 and field separators in every layout.
+for layout, slots in const.SLOTS.items():
+    for reading in ("Я" * 255, "🌡" * 255, "x" * 600):
+        state = State("input_text.reading", reading, friendly_name="Я" * 23)
+        options = {slot + "_entity": state.entity_id for slot in slots}
+        screen = render(layout, options, lambda _: state)
+        check(len(screen.encode()) <= const.SCREEN_MAX_BYTES, True)
+        check(screen.encode().decode(), screen)
+        check(screen.endswith("\n"), False)
 
 print("%d failed" % failed)
 sys.exit(1 if failed else 0)

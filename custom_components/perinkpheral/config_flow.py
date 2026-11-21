@@ -13,7 +13,7 @@ from homeassistant.helpers.network import NoURLAvailableError, get_url
 from .const import (CONF_DEVICE, CONF_LAYOUT, CONF_SECRET, CONF_URL, DOMAIN, LAYOUT_HERO,
                     LAYOUT_LIST, LAYOUT_SINGLE, LAYOUT_TILES, PICTURE_AUTO, PICTURES, SLOTS,
                     device_key, layout_of)
-from .device import DeviceError, push_settings
+from .device import DeviceError, get_hostname, push_settings
 
 CONF_NAME = "name"
 DEFAULT_NAME = "perinkpheral"
@@ -31,20 +31,24 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
         self._pairing_device = ""
 
     def is_matching(self, other_flow):
-        """Only a submitted pairing reserves the address, not an idle form."""
+        """Only a submitted pairing reserves the board, not an idle form."""
         return bool(self._pairing_device and self._pairing_device == other_flow._pairing_device)
 
     async def async_step_zeroconf(self, discovery_info):
         """A display announced itself on the network: its address is filled in."""
         self._found_device = str(discovery_info.host)
+        await self.async_set_unique_id(discovery_info.hostname)
+        self._abort_if_unique_id_configured(updates={CONF_DEVICE: self._found_device})
         # A display that has a screen already - added by hand, or found before -
         # is not offered again, under whichever of its names it was given.
         names = {device_key(self._found_device), device_key(discovery_info.hostname)}
         for entry in self._async_current_entries():
-            if device_key(entry.data.get(CONF_DEVICE, "")) in names:
+            if (device_key(entry.data.get(CONF_DEVICE, "")) in names
+                    or device_key(entry.unique_id or "") in names):
+                self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_DEVICE: self._found_device},
+                    unique_id=discovery_info.hostname)
                 return self.async_abort(reason="already_configured")
-        await self.async_set_unique_id(discovery_info.hostname)
-        self._abort_if_unique_id_configured()
         self.context["title_placeholders"] = {"name": discovery_info.hostname.rstrip(".")}
         return await self.async_step_user()
 
@@ -67,22 +71,35 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_URL: user_input.get(CONF_URL, "").strip(),
                 CONF_SECRET: secrets.token_urlsafe(SECRET_BYTES),
             }
-            if data[CONF_DEVICE] and not data[CONF_URL].startswith(("http://", "https://")):
+            if not device:
+                errors[CONF_DEVICE] = "device_required"
+            elif not data[CONF_URL].startswith(("http://", "https://")):
                 errors["base"] = "url_required"
-            elif data[CONF_DEVICE]:
-                self._pairing_device = device_key(device)
-                if self.hass.config_entries.flow.async_has_matching_flow(self):
-                    self._pairing_device = ""
-                    return self.async_abort(reason="already_configured")
+            else:
                 paired = False
                 try:
+                    identity = device_key(await get_hostname(self.hass, device))
+                    for entry in self._async_current_entries():
+                        known = device_key(entry.unique_id or entry.data.get(CONF_DEVICE, ""))
+                        if known == identity:
+                            return self.async_abort(reason="already_configured")
+                        # Older manual entries have no identity beyond their address.
+                        if not entry.unique_id and entry.data.get(CONF_DEVICE):
+                            known = device_key(await get_hostname(self.hass, entry.data[CONF_DEVICE]))
+                            if known == identity:
+                                return self.async_abort(reason="already_configured")
+                    await self.async_set_unique_id(identity + ".local.", raise_on_progress=False)
+                    self._abort_if_unique_id_configured()
+                    self._pairing_device = identity
+                    if self.hass.config_entries.flow.async_has_matching_flow(self):
+                        return self.async_abort(reason="already_configured")
                     await push_settings(self.hass, data[CONF_DEVICE], data[CONF_URL],
                                         data[CONF_SECRET])
                     paired = True
                 except DeviceError as failure:
                     errors["base"] = str(failure)
                 finally:
-                    # A successful flow owns the address until HA registers its entry.
+                    # A successful flow owns the board until HA registers its entry.
                     # Failed and canceled requests must leave it available for retry.
                     if not paired:
                         self._pairing_device = ""
@@ -96,7 +113,7 @@ class PerinkpheralConfigFlow(ConfigFlow, domain=DOMAIN):
                 selector.SelectSelector(selector.SelectSelectorConfig(
                     options=LAYOUTS, translation_key=CONF_LAYOUT,
                     mode=selector.SelectSelectorMode.LIST)),
-            vol.Optional(CONF_DEVICE, default=given.get(CONF_DEVICE, self._found_device)):
+            vol.Required(CONF_DEVICE, default=given.get(CONF_DEVICE, self._found_device)):
                 selector.TextSelector(),
             vol.Required(CONF_URL, default=given.get(CONF_URL, self._own_address())):
                 selector.TextSelector(selector.TextSelectorConfig(

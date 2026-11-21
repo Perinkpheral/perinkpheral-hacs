@@ -5,6 +5,8 @@ Nothing of Home Assistant is imported here: a state is anything with
 `state`, `attributes` and `entity_id`, and the test of this file runs
 without Home Assistant.
 """
+from math import isfinite
+
 from .const import (LAYOUT_HERO, LAYOUT_LIST, NAME_MAX, PICTURE_AUTO, SCREEN_MAX_BYTES, SLOTS)
 
 NOTHING = "--"
@@ -31,6 +33,8 @@ def plain(text):
 
 def number_text(value):
     """A number as short as it reads well: no decimals from a hundred up, one below."""
+    if not isfinite(value):
+        return NOTHING
     if abs(value) >= 100:
         return "%d" % round(value)
     text = "%.1f" % value
@@ -39,9 +43,12 @@ def number_text(value):
 
 def whole_number(text):
     try:
-        return "%d" % round(float(text))
-    except ValueError:
+        value = float(text)
+        return "%d" % round(value) if isfinite(value) else NOTHING
+    except (TypeError, ValueError):
         return text
+    except OverflowError:
+        return NOTHING
 
 
 def value_and_unit(state):
@@ -50,12 +57,20 @@ def value_and_unit(state):
         return NOTHING, ""
     if state.entity_id.startswith("weather."):
         temperature = state.attributes.get("temperature")
-        return (number_text(float(temperature)) if temperature is not None else NOTHING), DEGREE
+        try:
+            value = number_text(float(temperature))
+        except (TypeError, ValueError, OverflowError):
+            return NOTHING, ""
+        return value, DEGREE if value != NOTHING else ""
     unit = state.attributes.get("unit_of_measurement") or ""
     try:
         value = number_text(float(state.state))
     except (TypeError, ValueError):
         return plain(state.state), ""
+    except OverflowError:
+        return NOTHING, ""
+    if value == NOTHING:
+        return NOTHING, ""
     return value, DEGREE if unit in TEMPERATURE_UNITS else plain(unit)
 
 
@@ -130,4 +145,7 @@ def render(layout, options, state_of):
     # Whole lines only: a screen cut in the middle of one would draw half a value.
     while len(screen.encode("utf-8")) > SCREEN_MAX_BYTES and "\n" in screen:
         screen = screen[:screen.rindex("\n")]
+    # A first line that cannot fit must not become a partial reading.
+    if len(screen.encode("utf-8")) > SCREEN_MAX_BYTES:
+        return "hero|--|"
     return screen
