@@ -449,7 +449,7 @@ class Response:
 
 
 module("aiohttp", ClientError=type("ClientError", (Exception,), {}),
-       web=types.SimpleNamespace(Response=Response))
+       web=types.SimpleNamespace(Request=object, Response=Response))
 module("homeassistant.helpers.aiohttp_client", async_get_clientsession=lambda hass: hass.session)
 module("homeassistant.components")
 module("homeassistant.components.http", HomeAssistantView=object)
