@@ -38,9 +38,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def tell_the_display(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def tell_the_display(hass: HomeAssistant, entry: ConfigEntry, *,
+                           raise_on_error: bool = False) -> bool:
     """Writes the display's settings again, which makes it ask for its screen now.
-    False when there is no display to tell, or it did not answer."""
+    False when there is no display to tell, or writing failed.
+    Refresh requests the failure reason so it can explain how to recover."""
     device = entry.data.get(CONF_DEVICE)
     if not device:
         return False
@@ -55,6 +57,8 @@ async def tell_the_display(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await push_settings(hass, device, entry.data[CONF_URL], entry.data[CONF_SECRET])
     except DeviceError as failure:
         LOGGER.warning("The display at %s was not told: %s", device, failure)
+        if raise_on_error:
+            raise
         return False
     return True
 

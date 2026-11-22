@@ -7,7 +7,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import tell_the_display
-from .const import CONF_DEVICE, device_of
+from .const import CONF_DEVICE, DOMAIN, device_of
+from .device import DeviceError
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
@@ -26,5 +27,9 @@ class RefreshButton(ButtonEntity):
         self._attr_device_info = device_of(entry)
 
     async def async_press(self) -> None:
-        if not await tell_the_display(self.hass, self._entry):
-            raise HomeAssistantError("The display did not answer.")
+        try:
+            if not await tell_the_display(self.hass, self._entry, raise_on_error=True):
+                raise DeviceError("cannot_connect")
+        except DeviceError as failure:
+            reason = "identity_mismatch" if str(failure) == "identity_mismatch" else "cannot_connect"
+            raise HomeAssistantError(translation_domain=DOMAIN, translation_key=reason) from failure

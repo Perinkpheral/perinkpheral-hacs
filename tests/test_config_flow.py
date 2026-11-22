@@ -265,8 +265,7 @@ class PairingTests(unittest.TestCase):
                 pass
 
             async def json(self):
-                return {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
-                        "ota_protocol": 1, "supported_abis": [3]}
+                return payload
 
         calls = []
         def get(url):
@@ -274,9 +273,14 @@ class PairingTests(unittest.TestCase):
             return Answer()
         self.hass.session = types.SimpleNamespace(get=get)
         flow.get_hostname = device.get_hostname
-        result = self.discover_service("Kitchen._http._tcp.local.", "kitchen.local.")
-        self.assertEqual(result["type"], "form")
-        self.assertEqual(calls, ["http://192.0.2.42/api/status"])
+        for versions in ({}, {"ota_protocol": 1}, {"ota_protocol": 2, "supported_abis": [4]}):
+            with self.subTest(versions=versions):
+                payload = {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
+                           "supported_abis": [3], **versions}
+                calls.clear()
+                result = self.discover_service("Kitchen._http._tcp.local.", "kitchen.local.")
+                self.assertEqual(result["type"], "form")
+                self.assertEqual(calls, ["http://192.0.2.42/api/status"])
         self.assertEqual(pushes, [])
 
     def test_unrelated_or_unreachable_http_service_is_ignored(self):
@@ -544,6 +548,20 @@ module("homeassistant.const", Platform=types.SimpleNamespace(SENSOR="sensor", BU
 integration = load("__init__")
 
 
+class HomeAssistantError(Exception):
+    def __init__(self, message=None, *, translation_domain=None, translation_key=None):
+        super().__init__(message)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+
+
+module("homeassistant.exceptions", HomeAssistantError=HomeAssistantError)
+module("homeassistant.components.button", ButtonEntity=object)
+module("homeassistant.helpers.entity_platform", AddEntitiesCallback=object)
+sys.modules["perinkpheral"].tell_the_display = integration.tell_the_display
+button = load("button")
+
+
 class IdentityTransportTests(unittest.TestCase):
     def lookup(self, address, *, status=200, payload=None, failure=None, discovery=False):
         class Answer:
@@ -597,7 +615,7 @@ class IdentityTransportTests(unittest.TestCase):
 
     def test_discovery_requires_the_firmware_status_format(self):
         payload = {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
-                   "ota_protocol": 1, "supported_abis": [3]}
+                   "supported_abis": [3]}
         self.assertEqual(self.lookup("192.0.2.42", payload=payload, discovery=True)[0], "kitchen")
         for key in payload.keys() - {"hostname"}:
             with self.subTest(missing=key):
@@ -605,10 +623,19 @@ class IdentityTransportTests(unittest.TestCase):
                 with self.assertRaisesRegex(device.DeviceError, "not_perinkpheral"):
                     self.lookup("192.0.2.42", payload=incomplete, discovery=True)
         for changed in ({"firmware": ""}, {"firmware": 42}, {"mode": "recovery"},
-                        {"ota_protocol": 2}, {"supported_abis": "3"}, {"supported_abis": [2]}):
+                        {"supported_abis": "3"}, {"supported_abis": None}):
             with self.subTest(changed=changed):
                 with self.assertRaisesRegex(device.DeviceError, "not_perinkpheral"):
                     self.lookup("192.0.2.42", payload={**payload, **changed}, discovery=True)
+
+    def test_discovery_is_independent_of_ota_and_abi_versions(self):
+        payload = {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
+                   "supported_abis": [3]}
+        for changed in ({}, {"ota_protocol": 0}, {"ota_protocol": 1}, {"ota_protocol": 2},
+                        {"supported_abis": [2]}, {"supported_abis": [4]}, {"supported_abis": []}):
+            with self.subTest(changed=changed):
+                self.assertEqual(self.lookup("192.0.2.42", payload={**payload, **changed},
+                                             discovery=True)[0], "kitchen")
 
 
 class RepeatWriteTests(unittest.TestCase):
@@ -617,7 +644,8 @@ class RepeatWriteTests(unittest.TestCase):
         self.payload = {"hostname": "display"}
         self.status = 200
         self.failure = None
-        self.entry = types.SimpleNamespace(unique_id="DISPLAY.local.", data={
+        self.entry = types.SimpleNamespace(title="Desk", entry_id="desk",
+                                          unique_id="DISPLAY.local.", data={
             "device": "192.0.2.42", "url": "http://ha/", "secret": "paired",
         })
         owner = self
@@ -698,6 +726,51 @@ class RepeatWriteTests(unittest.TestCase):
         self.entry.data.pop("device")
         self.assertFalse(self.tell())
         self.assertEqual(self.calls, [])
+
+    def press(self):
+        entity = button.RefreshButton(self.entry)
+        entity.hass = self.hass
+        return asyncio.run(entity.async_press())
+
+    def test_refresh_reports_a_renamed_or_replaced_display_and_does_not_write(self):
+        for hostname in ("kitchen", "other-display"):
+            with self.subTest(hostname=hostname):
+                self.calls.clear()
+                self.payload = {"hostname": hostname}
+                with self.assertLogs(integration.LOGGER, level="WARNING"), \
+                        self.assertRaises(HomeAssistantError) as raised:
+                    self.press()
+                self.assertEqual(raised.exception.translation_domain, "perinkpheral")
+                self.assertEqual(raised.exception.translation_key, "identity_mismatch")
+                self.assertEqual(str(raised.exception.__cause__), "identity_mismatch")
+                self.assertEqual(self.calls, [("get", "http://192.0.2.42/api/status")])
+
+    def test_refresh_connection_failure_keeps_its_own_message(self):
+        self.failure = OSError("offline")
+        with self.assertLogs(integration.LOGGER, level="WARNING"), \
+                self.assertRaises(HomeAssistantError) as raised:
+            self.press()
+        self.assertEqual(raised.exception.translation_key, "cannot_connect")
+        self.assertEqual(self.calls, [("get", "http://192.0.2.42/api/status")])
+
+    def test_refresh_of_the_paired_display_still_writes_settings(self):
+        self.assertIsNone(self.press())
+        self.assertEqual([call[0] for call in self.calls], ["get", "post"])
+
+    def test_refresh_without_a_device_does_not_read_or_write(self):
+        self.entry.data.pop("device")
+        with self.assertRaises(HomeAssistantError) as raised:
+            self.press()
+        self.assertEqual(raised.exception.translation_key, "cannot_connect")
+        self.assertEqual(self.calls, [])
+
+    def test_refresh_repair_message_is_available_in_english_and_russian(self):
+        for language, action in (("en", "Pair it again."), ("ru", "Подключите его заново.")):
+            with self.subTest(language=language):
+                messages = json.loads((PACKAGE / "translations" / (language + ".json")).read_text())
+                mismatch = messages["exceptions"]["identity_mismatch"]["message"]
+                self.assertIn(action, mismatch)
+                self.assertNotEqual(mismatch, messages["exceptions"]["cannot_connect"]["message"])
 
 
 class ScreenViewTests(unittest.TestCase):

@@ -161,5 +161,13 @@
         "play": "Play"
       }
     }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "The display did not answer."
+    },
+    "identity_mismatch": {
+      "message": "A different or renamed display is at this address. Pair it again."
+    }
   }
 }

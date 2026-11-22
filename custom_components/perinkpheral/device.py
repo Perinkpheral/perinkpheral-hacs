@@ -44,9 +44,7 @@ async def get_hostname(hass: HomeAssistant, device: str, *, discovery: bool = Fa
     if discovery and not (isinstance(status.get("firmware"), str)
                           and status["firmware"]
                           and status.get("mode") == "application"
-                          and status.get("ota_protocol") == 1
-                          and isinstance(status.get("supported_abis"), list)
-                          and 3 in status["supported_abis"]):
+                          and isinstance(status.get("supported_abis"), list)):
         raise DeviceError("not_perinkpheral")
     return hostname.strip()
 
