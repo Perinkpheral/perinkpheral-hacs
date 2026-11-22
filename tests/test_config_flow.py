@@ -915,6 +915,18 @@ class ScreensOptionsTests(unittest.TestCase):
                              {"screen_1", "screen_2", "screen_3", "screen_4", "add"})
             self.assertEqual(set(steps["screen"]["menu_options"]),
                              {"edit", "remove", "move_up", "move_down"})
+            # The frontend localizes a menu's title without placeholders (it failed with
+            # "Screen {number}"); its description gets them.
+            for step in steps.values():
+                if "menu_options" in step:
+                    self.assertNotIn("{", step.get("title", ""))
+            self.assertIn("{number}", steps["screen"]["description"])
+        # Every step a language shows says the same in each: no English left in Russian.
+        en = json.loads((PACKAGE / "translations" / "en.json").read_text())["options"]["step"]
+        ru = json.loads((PACKAGE / "translations" / "ru.json").read_text())["options"]["step"]
+        for name, step in en.items():
+            self.assertEqual(set(step), set(ru[name]), name)
+            self.assertIn("{count}", steps["screen"]["description"])
             self.assertIn("layout", steps["edit"]["data"])
 
 

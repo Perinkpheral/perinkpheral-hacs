@@ -118,7 +118,6 @@
       },
       "edit": {
         "title": "Layout",
-        "description": "What was put into another layout's places is kept for when it is chosen again.",
         "data": {
           "layout": "Layout"
         }
@@ -134,7 +133,8 @@
         }
       },
       "screen": {
-        "title": "Screen {number}",
+        "title": "Screen",
+        "description": "Screen {number} of {count}",
         "menu_options": {
           "edit": "Edit",
           "remove": "Remove",

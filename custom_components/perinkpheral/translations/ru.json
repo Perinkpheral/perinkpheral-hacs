@@ -117,7 +117,8 @@
         }
       },
       "screen": {
-        "title": "Экран {number}",
+        "title": "Экран",
+        "description": "Экран {number} из {count}",
         "menu_options": {
           "edit": "Изменить",
           "remove": "Удалить",

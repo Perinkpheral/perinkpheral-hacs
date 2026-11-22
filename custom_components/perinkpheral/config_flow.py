@@ -176,8 +176,11 @@ class PerinkpheralOptionsFlow(OptionsFlow):
             choices.append("move_up")
         if index + 1 < len(self._screens):
             choices.append("move_down")
+        # Home Assistant's frontend fills placeholders into a menu's description and options, not
+        # into its title: the number stands in the description.
         return self.async_show_menu(step_id="screen", menu_options=choices,
-                                    description_placeholders={"number": str(index + 1)})
+                                    description_placeholders={"number": str(index + 1),
+                                                              "count": str(len(self._screens))})
 
     async def async_step_screen(self, user_input=None):
         """The screen's own menu, the step Home Assistant holds the menu above to."""
