@@ -154,5 +154,17 @@ for layout, slots in const.SLOTS.items():
         check(screen.encode().decode(), screen)
         check(screen.endswith("\n"), False)
 
+# Page metadata shares the 512-byte budget, including the first oversized reading.
+for layout, slots in const.SLOTS.items():
+    for reading in ("22", "Я" * 255, "x" * 506, "x" * 600):
+        state = State("input_text.reading", reading, friendly_name="Я" * 23)
+        options = {slot + "_entity": state.entity_id for slot in slots}
+        entry = types.SimpleNamespace(options={"screens": [{"layout": layout, **options}]}, data={})
+        page = renderer.render_page(entry, lambda _: state)
+        check(page.startswith("page|1|1\n"), True)
+        check(len(page.encode()) <= 512, True)
+        check(page.encode().decode(), page)
+        check(page.endswith("\n"), False)
+
 print("%d failed" % failed)
 sys.exit(1 if failed else 0)

@@ -55,16 +55,31 @@ class ConfigFlow:
         return {"type": "create_entry", "entry": entry}
 
 
+class OptionsFlow:
+    def async_show_form(self, **kwargs):
+        return {"type": "form", **kwargs}
+
+    def async_show_menu(self, **kwargs):
+        return {"type": "menu", **kwargs}
+
+    def async_create_entry(self, title, data):
+        return {"type": "create_entry", "data": data}
+
+    def add_suggested_values_to_schema(self, schema, values):
+        self.suggested = values
+        return schema
+
+
 module("voluptuous", Schema=lambda fields: fields,
        Required=lambda key, **kwargs: key, Optional=lambda key, **kwargs: key)
 module("homeassistant")
-module("homeassistant.config_entries", ConfigEntry=object, ConfigFlow=ConfigFlow, OptionsFlow=object)
-module("homeassistant.core", callback=lambda function: function, HomeAssistant=object)
+module("homeassistant.config_entries", ConfigEntry=object, ConfigFlow=ConfigFlow, OptionsFlow=OptionsFlow)
+module("homeassistant.core", callback=lambda function: function, HomeAssistant=object, Event=object)
 module("homeassistant.helpers", selector=types.SimpleNamespace(
-    TextSelector=lambda *args: None, TextSelectorConfig=lambda **kwargs: kwargs,
+    EntitySelector=lambda *args: None, TextSelector=lambda *args: None, TextSelectorConfig=lambda **kwargs: kwargs,
     TextSelectorType=types.SimpleNamespace(URL="url"),
     SelectSelector=lambda *args: None, SelectSelectorConfig=lambda **kwargs: kwargs,
-    SelectSelectorMode=types.SimpleNamespace(LIST="list"),
+    SelectSelectorMode=types.SimpleNamespace(LIST="list", DROPDOWN="dropdown"),
 ))
 module("homeassistant.helpers.network", NoURLAvailableError=RuntimeError, get_url=lambda hass, **kwargs: "")
 module("perinkpheral", __path__=[str(PACKAGE)])
@@ -787,8 +802,8 @@ class ScreenViewTests(unittest.TestCase):
             states=types.SimpleNamespace(get=get))
         self.view = view.ScreenView(hass)
 
-    def request(self, authorization="Bearer paired"):
-        return asyncio.run(self.view.get(types.SimpleNamespace(headers={"Authorization": authorization})))
+    def request(self, authorization="Bearer paired", query=None):
+        return asyncio.run(self.view.get(types.SimpleNamespace(headers={"Authorization": authorization}, query=query or {})))
 
     def test_disabled_entry_cannot_read_live_entity_data(self):
         for disabled_by in ("user", "integration"):
@@ -798,14 +813,14 @@ class ScreenViewTests(unittest.TestCase):
         self.assertEqual(self.reads, [])
 
     def test_enabled_and_reenabled_entry_returns_the_current_screen(self):
-        self.assertEqual(self.request().text, "hero|22.5|")
+        self.assertEqual(self.request().text, "page|1|1\nhero|22.5|")
         self.entry.disabled_by = "user"
         self.assertEqual(self.request().status, 401)
         self.entry.disabled_by = None
         self.state.state = "23"
         answer = self.request()
         self.assertEqual(answer.status, 200)
-        self.assertEqual(answer.text, "hero|23|")
+        self.assertEqual(answer.text, "page|1|1\nhero|23|")
         self.assertEqual(self.reads, ["sensor.room", "sensor.room"])
 
     def test_unknown_or_missing_token_is_rejected(self):
@@ -813,6 +828,145 @@ class ScreenViewTests(unittest.TestCase):
             with self.subTest(authorization=authorization):
                 self.assertEqual(self.request(authorization).status, 401)
         self.assertEqual(self.reads, [])
+
+
+class ScreensOptionsTests(unittest.TestCase):
+    def new_flow(self, options=None, layout="hero"):
+        entry = types.SimpleNamespace(options=options or {}, data={"layout": layout})
+        instance = flow.PerinkpheralOptionsFlow()
+        instance.config_entry = entry
+        self.run_step(instance.async_step_init())
+        return instance
+
+    @staticmethod
+    def run_step(step):
+        return asyncio.run(step)
+
+    def test_legacy_options_are_one_screen_and_save_without_losing_other_layouts(self):
+        old = {"hero_entity": "weather.home", "tile_1_entity": "sensor.room",
+               "row_1_entity": "sensor.co2"}
+        instance = self.new_flow(old)
+        self.assertEqual(const.screens_of(instance.config_entry), [{**old, "layout": "hero"}])
+        menu = self.run_step(instance.async_step_screen_1())
+        self.assertEqual(menu["menu_options"], ["edit"])
+        self.run_step(instance.async_step_edit({"layout": "tiles"}))
+        self.assertEqual(instance.suggested, {**old, "layout": "hero"})
+        result = self.run_step(instance.async_step_places({"tile_2_entity": "sensor.input"}))
+        self.assertEqual(result["data"], {"screens": [{
+            "layout": "tiles", "hero_entity": "weather.home", "row_1_entity": "sensor.co2",
+            "tile_2_entity": "sensor.input"}]})
+        self.assertEqual(instance.config_entry.options, old)
+
+    def test_legacy_options_layout_overrides_initial_layout(self):
+        instance = self.new_flow({"layout": "list", "row_1_entity": "sensor.room"}, "tiles")
+        self.assertEqual(instance._screens[0]["layout"], "list")
+        empty = self.new_flow(layout="single")
+        self.assertEqual(empty._screens, [{"layout": "single"}])
+
+    def test_add_edit_four_limit_and_independent_places(self):
+        instance = self.new_flow({"hero_entity": "weather.home"})
+        layouts = ("tiles", "single", "list")
+        for index, layout in enumerate(layouts, 2):
+            self.assertEqual(self.run_step(instance.async_step_add())["step_id"], "edit")
+            self.run_step(instance.async_step_edit({"layout": layout}))
+            self.assertEqual(instance.suggested, {})
+            result = self.run_step(instance.async_step_places({"%s_entity" % const.SLOTS[layout][0]:
+                                                               "sensor.screen_%d" % index}))
+            self.assertEqual(len(result["data"]["screens"]), index)
+        self.assertEqual(instance._screens[0]["hero_entity"], "weather.home")
+        self.assertNotIn("add", self.run_step(instance.async_step_init())["menu_options"])
+        self.assertEqual(self.run_step(instance.async_step_add())["type"], "menu")
+        self.assertEqual(len(instance._screens), 4)
+        self.run_step(instance.async_step_screen_3())
+        self.run_step(instance.async_step_edit({"layout": "single"}))
+        self.assertEqual(instance.suggested["value_entity"], "sensor.screen_3")
+        self.run_step(instance.async_step_places({"value_entity": "sensor.edited"}))
+        self.assertEqual(instance._screens[2]["value_entity"], "sensor.edited")
+        self.assertEqual(instance._screens[1]["tile_1_entity"], "sensor.screen_2")
+        self.run_step(instance.async_step_screen_4())
+        self.assertEqual(instance._selected, 3)
+
+    def test_remove_and_reorder_save_the_list_and_protect_ends(self):
+        screens = [{"layout": "hero", "hero_entity": str(n)} for n in range(3)]
+        instance = self.new_flow({"screens": screens})
+        self.run_step(instance.async_step_screen_2())
+        result = self.run_step(instance.async_step_move_up())
+        self.assertEqual([s["hero_entity"] for s in result["data"]["screens"]], ["1", "0", "2"])
+        self.run_step(instance.async_step_screen_1())
+        result = self.run_step(instance.async_step_move_down())
+        self.assertEqual([s["hero_entity"] for s in result["data"]["screens"]], ["0", "1", "2"])
+        self.run_step(instance.async_step_screen_2())
+        self.run_step(instance.async_step_remove())
+        self.assertEqual([s["hero_entity"] for s in instance._screens], ["0", "2"])
+        self.run_step(instance.async_step_screen_1())
+        self.run_step(instance.async_step_remove())
+        self.assertNotIn("remove", self.run_step(instance.async_step_screen_1())["menu_options"])
+        self.run_step(instance.async_step_remove())
+        self.run_step(instance.async_step_move_up())
+        self.run_step(instance.async_step_move_down())
+        self.assertEqual(len(instance._screens), 1)
+        self.assertEqual(screens[1]["hero_entity"], "1")
+
+    def test_menu_translations_in_both_languages(self):
+        for language in ("en", "ru"):
+            data = json.loads((PACKAGE / "translations" / (language + ".json")).read_text())
+            steps = data["options"]["step"]
+            self.assertEqual(set(steps["init"]["menu_options"]),
+                             {"screen_1", "screen_2", "screen_3", "screen_4", "add"})
+            self.assertEqual(set(steps["screen"]["menu_options"]),
+                             {"edit", "remove", "move_up", "move_down"})
+            self.assertIn("layout", steps["edit"]["data"])
+
+
+class ScreenPageTests(ScreenViewTests):
+    def test_selected_page_only_reads_its_entities_and_clamps(self):
+        self.entry.options = {"screens": [
+            {"layout": "hero", "hero_entity": "sensor.first"},
+            {"layout": "single", "value_entity": "sensor.second"},
+            {"layout": "tiles", "tile_1_entity": "sensor.third"}]}
+        for page, actual, entity in ((None, 1, "sensor.first"), ("2", 2, "sensor.second"),
+                                     ("3", 3, "sensor.third"), ("99", 3, "sensor.third"),
+                                     ("0", 1, "sensor.first"), ("-2", 1, "sensor.first")):
+            with self.subTest(page=page):
+                self.reads.clear()
+                answer = self.request(query={} if page is None else {"page": page})
+                self.assertEqual(answer.status, 200)
+                self.assertTrue(answer.text.startswith("page|%d|3\n" % actual))
+                self.assertEqual(self.reads, [entity])
+        self.entry.options["screens"].append({"layout": "hero", "hero_entity": "sensor.fourth"})
+        self.reads.clear()
+        self.assertTrue(self.request(query={"page": "99"}).text.startswith("page|4|4\n"))
+        self.assertEqual(self.reads, ["sensor.fourth"])
+        self.assertEqual(self.request(query={"page": "bad"}).status, 400)
+        self.assertEqual(self.request(query={"page": ""}).status, 400)
+
+
+
+module("homeassistant.components.sensor", SensorEntity=object)
+module("homeassistant.helpers.event", async_track_state_change_event=lambda *args: None)
+sensor = load("sensor")
+
+
+class ScreenSensorTests(unittest.TestCase):
+    def test_sensor_still_reads_only_screen_one_without_page_metadata(self):
+        entry = types.SimpleNamespace(entry_id="desk", title="Desk", data={"layout": "hero"},
+                                      options={"screens": [
+                                          {"layout": "single", "value_entity": "sensor.first"},
+                                          {"layout": "hero", "hero_entity": "sensor.second"}]})
+        reads = []
+        def state_of(entity_id):
+            reads.append(entity_id)
+            return types.SimpleNamespace(entity_id=entity_id, state="23", attributes={})
+        entity = sensor.ScreenSensor(entry)
+        entity.hass = types.SimpleNamespace(states=types.SimpleNamespace(get=state_of))
+        entity._put_together()
+        self.assertEqual(reads, ["sensor.first"])
+        self.assertEqual(entity._entities, ["sensor.first"])
+        self.assertEqual(entity.extra_state_attributes,
+                         {"screen": "layout|single\nitem|First||23", "layout": "single"})
+        entry.options = {"hero_entity": "sensor.legacy"}
+        entity._put_together()
+        self.assertEqual(entity.extra_state_attributes, {"screen": "hero|23|", "layout": "hero"})
 
 
 if __name__ == "__main__":

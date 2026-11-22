@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 
 DOMAIN = "perinkpheral"
 
+CONF_SCREENS = "screens"
+MAX_SCREENS = 4
 CONF_LAYOUT = "layout"
 CONF_DEVICE = "device"  # the display's address on the network
 CONF_URL = "url"        # this Home Assistant's address, as the display reaches it
@@ -35,10 +37,18 @@ PICTURES = [
 ]
 
 
-
 def layout_of(entry):
     """The screen's layout: the one it was made with, until another is chosen for it."""
-    return entry.options.get(CONF_LAYOUT) or entry.data.get(CONF_LAYOUT, LAYOUT_HERO)
+    return screens_of(entry)[0][CONF_LAYOUT]
+
+
+def screens_of(entry):
+    """Read the list form, or preserve every place of a legacy flat screen."""
+    screens = entry.options.get(CONF_SCREENS)
+    if not screens:
+        screens = [entry.options]
+    return [{**screen, CONF_LAYOUT: screen.get(CONF_LAYOUT) or
+             entry.data.get(CONF_LAYOUT, LAYOUT_HERO)} for screen in screens[:MAX_SCREENS]]
 
 
 def device_of(entry):

@@ -7,7 +7,7 @@ without Home Assistant.
 """
 from math import isfinite
 
-from .const import (LAYOUT_HERO, LAYOUT_LIST, NAME_MAX, PICTURE_AUTO, SCREEN_MAX_BYTES, SLOTS)
+from .const import (LAYOUT_HERO, LAYOUT_LIST, NAME_MAX, PICTURE_AUTO, SCREEN_MAX_BYTES, SLOTS, CONF_LAYOUT, screens_of)
 
 NOTHING = "--"
 DEGREE = "°"
@@ -115,7 +115,7 @@ def name_of(state, entity_id, label):
     return entity_id.split(".")[-1].replace("_", " ").capitalize()[:NAME_MAX]
 
 
-def render(layout, options, state_of):
+def render(layout, options, state_of, max_bytes=SCREEN_MAX_BYTES):
     """The lines of the screen. `options` holds, for every place, `<place>_entity`,
     `<place>_label`, `<place>_unit` and `<place>_picture`; `state_of(entity_id)` gives a state or None."""
     lines = [] if layout == LAYOUT_HERO else ["layout|" + layout]
@@ -143,9 +143,19 @@ def render(layout, options, state_of):
     # versions. The explicit layout clears their cached readings too.
     screen = "\n".join(lines) if lines else "layout|hero"
     # Whole lines only: a screen cut in the middle of one would draw half a value.
-    while len(screen.encode("utf-8")) > SCREEN_MAX_BYTES and "\n" in screen:
+    while len(screen.encode("utf-8")) > max_bytes and "\n" in screen:
         screen = screen[:screen.rindex("\n")]
     # A first line that cannot fit must not become a partial reading.
-    if len(screen.encode("utf-8")) > SCREEN_MAX_BYTES:
+    if len(screen.encode("utf-8")) > max_bytes:
         return "hero|--|"
     return screen
+
+
+def render_page(entry, state_of, page=1):
+    """Render only the selected screen, reserving space for its protocol header."""
+    screens = screens_of(entry)
+    page = max(1, min(page, len(screens)))
+    header = "page|%d|%d\n" % (page, len(screens))
+    screen = screens[page - 1]
+    return header + render(screen[CONF_LAYOUT], screen, state_of,
+                           SCREEN_MAX_BYTES - len(header.encode("utf-8")))

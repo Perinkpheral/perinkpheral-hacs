@@ -7,8 +7,8 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_SECRET, DOMAIN, SCREEN_PATH, layout_of
-from .render import render
+from .const import CONF_SECRET, DOMAIN, SCREEN_PATH
+from .render import render_page
 
 BEARER = "Bearer "
 
@@ -32,6 +32,10 @@ class ScreenView(HomeAssistantView):
                 continue
             secret = entry.data.get(CONF_SECRET, "")
             if secret and shown and hmac.compare_digest(secret.encode(), shown.encode()):
-                screen = render(layout_of(entry), entry.options, self._hass.states.get)
+                try:
+                    page = int(request.query.get("page", "1"))
+                except ValueError:
+                    return web.Response(status=400, text="Invalid page.")
+                screen = render_page(entry, self._hass.states.get, page)
                 return web.Response(text=screen, content_type="text/plain", charset="utf-8")
         return web.Response(status=401, text="Unknown display.")

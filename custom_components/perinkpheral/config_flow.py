@@ -13,7 +13,7 @@ from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .const import (CONF_DEVICE, CONF_LAYOUT, CONF_SECRET, CONF_URL, DOMAIN, LAYOUT_HERO,
                     LAYOUT_LIST, LAYOUT_SINGLE, LAYOUT_TILES, PICTURE_AUTO, PICTURES, SLOTS,
-                    device_key, layout_of)
+                    CONF_SCREENS, MAX_SCREENS, device_key, screens_of)
 from .device import DeviceError, get_hostname, push_settings
 
 CONF_NAME = "name"
@@ -151,28 +151,100 @@ class PerinkpheralOptionsFlow(OptionsFlow):
 
     def __init__(self) -> None:
         self._layout = LAYOUT_HERO
+        self._screens = None
+        self._selected = 0
+        self._adding = False
+
+    def _save(self):
+        return self.async_create_entry(title="", data={CONF_SCREENS: self._screens})
 
     async def async_step_init(self, user_input=None):
+        if self._screens is None:
+            self._screens = screens_of(self.config_entry)
+        choices = ["screen_%d" % (index + 1) for index in range(len(self._screens))]
+        if len(self._screens) < MAX_SCREENS:
+            choices.append("add")
+        return self.async_show_menu(step_id="init", menu_options=choices)
+
+    async def _screen(self, index):
+        self._selected = index
+        self._adding = False
+        choices = ["edit"]
+        if len(self._screens) > 1:
+            choices.append("remove")
+        if index > 0:
+            choices.append("move_up")
+        if index + 1 < len(self._screens):
+            choices.append("move_down")
+        return self.async_show_menu(step_id="screen", menu_options=choices,
+                                    description_placeholders={"number": str(index + 1)})
+
+    async def async_step_screen_1(self, user_input=None):
+        return await self._screen(0)
+
+    async def async_step_screen_2(self, user_input=None):
+        return await self._screen(1)
+
+    async def async_step_screen_3(self, user_input=None):
+        return await self._screen(2)
+
+    async def async_step_screen_4(self, user_input=None):
+        return await self._screen(3)
+
+    async def async_step_add(self, user_input=None):
+        if len(self._screens) >= MAX_SCREENS:
+            return await self.async_step_init()
+        self._selected = len(self._screens)
+        self._adding = True
+        return await self.async_step_edit()
+
+    async def async_step_remove(self, user_input=None):
+        if len(self._screens) > 1:
+            self._screens.pop(self._selected)
+        return self._save()
+
+    async def async_step_move_up(self, user_input=None):
+        index = self._selected
+        if index > 0:
+            self._screens[index - 1], self._screens[index] = self._screens[index], self._screens[index - 1]
+        return self._save()
+
+    async def async_step_move_down(self, user_input=None):
+        index = self._selected
+        if index + 1 < len(self._screens):
+            self._screens[index + 1], self._screens[index] = self._screens[index], self._screens[index + 1]
+        return self._save()
+
+    def _options(self):
+        return {} if self._adding else self._screens[self._selected]
+
+    async def async_step_edit(self, user_input=None):
         if user_input is not None:
             self._layout = user_input[CONF_LAYOUT]
             return await self.async_step_places()
         schema = vol.Schema({
-            vol.Required(CONF_LAYOUT, default=layout_of(self.config_entry)):
+            vol.Required(CONF_LAYOUT, default=self._options().get(CONF_LAYOUT, LAYOUT_HERO)):
                 selector.SelectSelector(selector.SelectSelectorConfig(
                     options=LAYOUTS, translation_key=CONF_LAYOUT,
                     mode=selector.SelectSelectorMode.LIST)),
         })
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="edit", data_schema=schema)
 
     async def async_step_places(self, user_input=None):
         slots = SLOTS[self._layout]
         if user_input is not None:
             # A field that was cleared is not in the answer at all: the place is empty.
             of_this_layout = tuple(slot + "_" for slot in slots)
-            kept = {key: value for key, value in self.config_entry.options.items()
+            kept = {key: value for key, value in self._options().items()
                     if not key.startswith(of_this_layout)}
-            return self.async_create_entry(
-                title="", data={**kept, **user_input, CONF_LAYOUT: self._layout})
+            screen = {**kept, **user_input, CONF_LAYOUT: self._layout}
+            if self._adding:
+                if len(self._screens) >= MAX_SCREENS:
+                    return await self.async_step_init()
+                self._screens.append(screen)
+            else:
+                self._screens[self._selected] = screen
+            return self._save()
         fields = {}
         for slot in slots:
             fields[vol.Optional(slot + "_entity")] = selector.EntitySelector()
@@ -186,5 +258,5 @@ class PerinkpheralOptionsFlow(OptionsFlow):
                         options=PICTURES, translation_key="picture",
                         mode=selector.SelectSelectorMode.DROPDOWN)))
         schema = self.add_suggested_values_to_schema(vol.Schema(fields),
-                                                     self.config_entry.options)
+                                                     self._options())
         return self.async_show_form(step_id="places", data_schema=schema)

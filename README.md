@@ -17,7 +17,9 @@ Requires Home Assistant, HACS and HA Companion (`ha`) installed from the device'
 3. Set the display address and the Home Assistant origin reachable from the display,
    such as `http://homeassistant.local:8123`. Do not include a dashboard path, query
    or fragment.
-4. Configure the layout and entities in the integration options.
+4. Open the integration options to manage up to four screens. Select a screen to
+   edit its layout and entities, remove it, or move it up or down. Add screen creates
+   another screen with its own layout. At least one screen is kept.
 
 [![Add the repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Perinkpheral&repository=perinkpheral-hacs&category=integration)
 [![Add the integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=perinkpheral)
@@ -40,6 +42,18 @@ before settings can be sent.
 
 [HA Companion's reference](https://github.com/perinkpheral/perinkpheral-apps/blob/main/apps/ha/README.md)
 describes the screen format rendered by this integration.
+
+HA Companion requests `/api/perinkpheral/screen?page=<n>` (1-based, default 1).
+The reply starts with `page|<actual>|<count>`, with up to four screens; a page past
+the end returns the last screen. Only that screen's entities are read. Existing
+applications ignore the new line. The text sensor continues to expose screen 1
+without the page line. Replies, including the header, fit in 512 UTF-8 bytes.
+
+Screen settings are stored in `entry.options["screens"]` as a list of dictionaries,
+each containing `layout` and its place settings. Older flat options are read as one
+screen and converted to the list form when options are next saved, retaining
+settings from other layouts. On the display, UP and DOWN wrap between screens;
+OK refreshes the current screen. Holding UP or DOWN scrolls a list.
 Application code belongs in [perinkpheral-apps](https://github.com/perinkpheral/perinkpheral-apps);
 this repository owns the Home Assistant component. The device API is documented in
 [the firmware repository](https://github.com/Perinkpheral/perinkpheral-os/blob/main/docs/api/openapi.yaml).

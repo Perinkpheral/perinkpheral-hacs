@@ -6,7 +6,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import SLOTS, device_of, layout_of
+from .const import SLOTS, device_of, layout_of, screens_of
 from .render import render
 
 
@@ -36,7 +36,7 @@ class ScreenSensor(SensorEntity):
 
     @property
     def _entities(self) -> list[str]:
-        found = [self._entry.options.get(slot + "_entity") for slot in SLOTS[self._layout]]
+        found = [screens_of(self._entry)[0].get(slot + "_entity") for slot in SLOTS[self._layout]]
         return [entity_id for entity_id in found if entity_id]
 
     @property
@@ -48,7 +48,7 @@ class ScreenSensor(SensorEntity):
         return {"screen": self._screen, "layout": self._layout}
 
     def _put_together(self) -> None:
-        self._screen = render(self._layout, self._entry.options, self.hass.states.get)
+        self._screen = render(self._layout, screens_of(self._entry)[0], self.hass.states.get)
 
     async def async_added_to_hass(self) -> None:
         self._put_together()
