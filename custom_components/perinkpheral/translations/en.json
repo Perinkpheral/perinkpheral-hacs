@@ -177,7 +177,10 @@
         "check": "Check",
         "warning": "Warning",
         "info": "Info",
-        "play": "Play"
+        "play": "Play",
+        "layers": "Layers",
+        "progress": "Progress",
+        "cube": "Cube"
       }
     }
   },

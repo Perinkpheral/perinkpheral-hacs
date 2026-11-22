@@ -33,7 +33,7 @@ PICTURE_AUTO = "auto"
 PICTURES = [
     PICTURE_AUTO, "none", "thermometer", "drop", "co2", "gauge", "plug", "bolt", "chip",
     "network", "battery", "bulb", "door", "home", "moon", "umbrella", "wind", "bell",
-    "clock", "check", "warning", "info", "play",
+    "clock", "check", "warning", "info", "play", "layers", "progress", "cube",
 ]
 
 
