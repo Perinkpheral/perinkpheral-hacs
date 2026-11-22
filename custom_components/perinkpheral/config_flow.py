@@ -179,6 +179,10 @@ class PerinkpheralOptionsFlow(OptionsFlow):
         return self.async_show_menu(step_id="screen", menu_options=choices,
                                     description_placeholders={"number": str(index + 1)})
 
+    async def async_step_screen(self, user_input=None):
+        """The screen's own menu, the step Home Assistant holds the menu above to."""
+        return await self._screen(self._selected)
+
     async def async_step_screen_1(self, user_input=None):
         return await self._screen(0)
 

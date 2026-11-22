@@ -969,5 +969,20 @@ class ScreenSensorTests(unittest.TestCase):
         self.assertEqual(entity.extra_state_attributes, {"screen": "hero|23|", "layout": "hero"})
 
 
+class EveryShownStepExists(unittest.TestCase):
+    """Home Assistant refuses a form or menu whose step has no async_step_ method (UnknownStep),
+    which the stubs above do not: the source is held to it instead."""
+
+    def test_every_step_id_has_its_method(self):
+        import pathlib
+        import re
+        source = (pathlib.Path(__file__).parent.parent / "custom_components/perinkpheral/config_flow.py").read_text()
+        for step in set(re.findall(r'step_id="([a-z0-9_]+)"', source)):
+            self.assertIn("async def async_step_%s(" % step, source, step)
+        for menu in re.findall(r'menu_options=\[([^\]]*)\]', source):
+            for option in re.findall(r'"([a-z0-9_]+)"', menu):
+                self.assertIn("async def async_step_%s(" % option, source, option)
+
+
 if __name__ == "__main__":
     unittest.main()
