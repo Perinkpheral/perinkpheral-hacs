@@ -14,7 +14,9 @@ Requires Home Assistant, HACS and HA Companion (`ha`) installed from the device'
 
 1. Add this repository to HACS as an integration and download it.
 2. Restart Home Assistant, then add perINKpheral under Settings - Devices & services.
-3. Set the display address and the Home Assistant URL reachable from the display.
+3. Set the display address and the Home Assistant origin reachable from the display,
+   such as `http://homeassistant.local:8123`. Do not include a dashboard path, query
+   or fragment.
 4. Configure the layout and entities in the integration options.
 
 [![Add the repository to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Perinkpheral&repository=perinkpheral-hacs&category=integration)
@@ -40,11 +42,12 @@ before settings can be sent.
 describes the screen format rendered by this integration.
 Application code belongs in [perinkpheral-apps](https://github.com/perinkpheral/perinkpheral-apps);
 this repository owns the Home Assistant component. The device API is documented in
-[the firmware repository](https://github.com/perinkpheral/perinkpheral/blob/main/docs/api/openapi.yaml).
+[the firmware repository](https://github.com/Perinkpheral/perinkpheral-os/blob/main/docs/api/openapi.yaml).
 
 ## Development
 
-Rendering and pairing tests run with Python 3, without Home Assistant:
+Rendering and pairing tests require Python 3.11 or later and run without Home Assistant.
+CI uses Python 3.13.
 
 ```sh
 python3 tests/test_render.py
