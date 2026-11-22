@@ -16,8 +16,7 @@
   "version": "0.3.4",
   "zeroconf": [
     {
-      "type": "_http._tcp.local.",
-      "name": "perinkpheral*"
+      "type": "_http._tcp.local."
     }
   ]
 }

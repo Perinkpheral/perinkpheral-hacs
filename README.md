@@ -25,9 +25,16 @@ fetches its screen from Home Assistant. A sensor exposes the screen text in
 Home Assistant; a refresh button requests an update on the display.
 
 Displays are identified by the hostname reported by the firmware, which follows
-the device name. Give each display a distinct name. If a renamed display also
-changes address, remove its old integration entry and pair it again. The firmware
+the device name. Give each display a distinct name. After renaming a display,
+remove its old integration entry and pair it again. The firmware
 status API currently provides no stable device ID across renames.
+
+Discovery accepts custom display names. For an unfamiliar HTTP service it checks
+the firmware status format before offering setup. A paired display's hostname
+announcement updates its address after a DHCP change. Before writing settings,
+the integration checks that the address still reports the paired hostname.
+Older entries without a saved hostname must be rediscovered or paired again
+before settings can be sent.
 
 [HA Companion's reference](https://github.com/perinkpheral/perinkpheral-apps/blob/main/apps/ha/README.md)
 describes the screen format rendered by this integration.

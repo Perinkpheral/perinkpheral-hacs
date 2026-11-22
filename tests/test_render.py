@@ -82,6 +82,18 @@ check(render("tiles", {
 ]))
 
 check(render("hero", {"hero_entity": "sensor.room"}, STATES.get), "hero|23°|thermometer")
+# Kelvin keeps its own unit; only Celsius and Fahrenheit use the degree shorthand.
+for unit, reading, rendered_unit in (("K", "295", "K"), ("°C", "22", "°"), ("°F", "72", "°")):
+    state = State("sensor.temperature", reading, unit_of_measurement=unit,
+                  device_class="temperature", friendly_name="Temperature")
+    check(renderer.value_and_unit(state), (reading, rendered_unit))
+    for layout, slot, picture in (("tiles", "tile_1", "thermometer"),
+                                  ("single", "value", "thermometer"), ("list", "row_1", "")):
+        check(render(layout, {slot + "_entity": state.entity_id}, lambda _: state),
+              "layout|%s\nitem|Temperature|%s|%s%s" % (layout, picture, reading, rendered_unit))
+    check(render("hero", {"detail_1_entity": state.entity_id}, lambda _: state),
+          "detail|295|K|thermometer" if unit == "K" else
+          "detail|%s°||thermometer" % reading)
 # the user's own unit where the entity's does not fit, or none at all
 check(render("tiles", {"tile_1_entity": "sensor.co2", "tile_1_label": "CO2", "tile_1_unit": "-",
                        "tile_2_entity": "sensor.input", "tile_2_label": "In", "tile_2_unit": "volt",

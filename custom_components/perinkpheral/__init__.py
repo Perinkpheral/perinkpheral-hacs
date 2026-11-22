@@ -12,8 +12,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_DEVICE, CONF_SECRET, CONF_URL, DOMAIN
-from .device import DeviceError, push_settings
+from .const import CONF_DEVICE, CONF_SECRET, CONF_URL, DOMAIN, device_key
+from .device import DeviceError, get_hostname, push_settings
 from .view import ScreenView
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
@@ -45,6 +45,13 @@ async def tell_the_display(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not device:
         return False
     try:
+        # An old IP may now belong to another display. Entries without an
+        # identity must be rediscovered or paired again before sharing a secret.
+        if not entry.unique_id:
+            raise DeviceError("identity_missing")
+        hostname = await get_hostname(hass, device)
+        if device_key(hostname) != device_key(entry.unique_id):
+            raise DeviceError("identity_mismatch")
         await push_settings(hass, device, entry.data[CONF_URL], entry.data[CONF_SECRET])
     except DeviceError as failure:
         LOGGER.warning("The display at %s was not told: %s", device, failure)

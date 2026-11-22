@@ -24,8 +24,8 @@ class DeviceError(Exception):
     """The display did not take the settings; the text is the reason."""
 
 
-async def get_hostname(hass: HomeAssistant, device: str) -> str:
-    """Read the board's identity before sending it pairing credentials."""
+async def get_hostname(hass: HomeAssistant, device: str, *, discovery: bool = False) -> str:
+    """Read the board's identity, checking the firmware status format for discovery."""
     address = device if "://" in device else "http://" + device
     try:
         async with asyncio.timeout(TIMEOUT_S):
@@ -39,6 +39,15 @@ async def get_hostname(hass: HomeAssistant, device: str) -> str:
     hostname = status.get("hostname") if isinstance(status, dict) else None
     if not isinstance(hostname, str) or not hostname.strip():
         raise DeviceError("cannot_connect")
+    # HTTP service names are editable and carry no product TXT record. Check
+    # the firmware status format before offering an unfamiliar service in HA.
+    if discovery and not (isinstance(status.get("firmware"), str)
+                          and status["firmware"]
+                          and status.get("mode") == "application"
+                          and status.get("ota_protocol") == 1
+                          and isinstance(status.get("supported_abis"), list)
+                          and 3 in status["supported_abis"]):
+        raise DeviceError("not_perinkpheral")
     return hostname.strip()
 
 

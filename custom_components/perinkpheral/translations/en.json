@@ -25,7 +25,8 @@
       "url_required": "Give this Home Assistant's address, with http or https."
     },
     "abort": {
-      "already_configured": "This display is already set up."
+      "already_configured": "This display is already set up.",
+      "not_perinkpheral": "This service did not identify itself as a perINKpheral display."
     }
   },
   "options": {

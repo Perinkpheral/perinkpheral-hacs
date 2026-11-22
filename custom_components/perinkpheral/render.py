@@ -11,7 +11,7 @@ from .const import (LAYOUT_HERO, LAYOUT_LIST, NAME_MAX, PICTURE_AUTO, SCREEN_MAX
 
 NOTHING = "--"
 DEGREE = "°"
-TEMPERATURE_UNITS = ("°C", "°F", "K")
+TEMPERATURE_UNITS = ("°C", "°F")
 UNAVAILABLE = ("unavailable", "unknown", "none", "")
 # The picture a kind of sensor gets when the user chose none.
 PICTURE_OF_CLASS = {

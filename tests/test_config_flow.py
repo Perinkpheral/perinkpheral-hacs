@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Exercise the real configuration flow with an in-memory HA and device transport."""
 import asyncio
+from fnmatch import fnmatchcase
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import types
@@ -75,7 +77,7 @@ async def push_settings(hass, device, url, secret):
     pushes.append((device, url, secret))
 
 
-async def get_hostname(hass, device):
+async def get_hostname(hass, device, *, discovery=False):
     lookups.append(device)
     key = const.device_key(device)
     return hostnames.get(key, key.replace(":", "-"))
@@ -177,6 +179,7 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(pushes, [])
 
     def test_discovery_updates_legacy_manual_entry(self):
+        hostnames["192.0.2.42"] = "display"
         for address in ("display.local", "192.0.2.42"):
             with self.subTest(address=address):
                 entry = types.SimpleNamespace(unique_id=None, data={"device": address, "secret": "keep"})
@@ -189,6 +192,7 @@ class PairingTests(unittest.TestCase):
                 self.assertEqual(entry.unique_id, "display.local.")
 
     def test_reused_ip_does_not_rebind_an_identified_display(self):
+        hostnames["192.0.2.42"] = "second"
         entry = types.SimpleNamespace(unique_id="first.local.", data={
             "device": "192.0.2.42", "secret": "keep", "url": "http://ha", "layout": "hero",
         })
@@ -207,15 +211,95 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(entry.unique_id, "first.local.")
         self.assertEqual(entry.data, {**original, "device": "192.0.2.43"})
         self.assertEqual(pushes, [])
-        self.assertEqual(lookups, [])
+        self.assertEqual(lookups, ["192.0.2.42"])
 
     def test_new_discovery_shows_the_address_without_pairing(self):
+        hostnames["192.0.2.42"] = "display"
         result = asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
             host="192.0.2.42", hostname="display.local.",
         )))
         self.assertEqual(result["type"], "form")
         self.assertEqual(pushes, [])
+        self.assertEqual(lookups, ["192.0.2.42"])
+
+    def discover_service(self, name, hostname):
+        """Apply the manifest matcher before dispatching to the real flow."""
+        service_type = "_http._tcp.local."
+        manifest = json.loads((PACKAGE / "manifest.json").read_text())
+        if not any(matcher["type"] == service_type
+                   and fnmatchcase(name.lower(), matcher.get("name", "*").lower())
+                   for matcher in manifest["zeroconf"]):
+            self.fail("The manifest dropped the device announcement")
+        return asyncio.run(self.new_flow().async_step_zeroconf(types.SimpleNamespace(
+            name=name, host="192.0.2.42", hostname=hostname,
+        )))
+
+    def test_custom_name_discovery_updates_a_manual_pairing_after_dhcp_change(self):
+        hostnames["192.0.2.1"] = "kitchen"
+        self.assertEqual(self.pair("192.0.2.1")["type"], "create_entry")
+        entry = ConfigFlow.entries[0]
+        original = entry.data.copy()
+        lookups.clear()
+        result = self.discover_service("Kitchen._http._tcp.local.", "kitchen.local.")
+        self.assertEqual(result, {"type": "abort", "reason": "already_configured"})
+        self.assertEqual(entry.data, {**original, "device": "192.0.2.42"})
+        self.assertEqual(entry.unique_id, "kitchen.local.")
+        self.assertEqual(len(pushes), 1)
         self.assertEqual(lookups, [])
+
+    def test_custom_name_is_discovered_before_pairing(self):
+        hostnames["192.0.2.42"] = "kitchen"
+        result = self.discover_service("Kitchen._http._tcp.local.", "KITCHEN.local.")
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(pushes, [])
+        self.assertEqual(lookups, ["192.0.2.42"])
+
+    def test_custom_discovery_uses_the_real_status_transport(self):
+        class Answer:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def json(self):
+                return {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
+                        "ota_protocol": 1, "supported_abis": [3]}
+
+        calls = []
+        def get(url):
+            calls.append(url)
+            return Answer()
+        self.hass.session = types.SimpleNamespace(get=get)
+        flow.get_hostname = device.get_hostname
+        result = self.discover_service("Kitchen._http._tcp.local.", "kitchen.local.")
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(calls, ["http://192.0.2.42/api/status"])
+        self.assertEqual(pushes, [])
+
+    def test_unrelated_or_unreachable_http_service_is_ignored(self):
+        for reason in ("not_perinkpheral", "cannot_connect", "refused"):
+            with self.subTest(reason=reason):
+                async def lookup(hass, device, *, discovery=False):
+                    self.assertTrue(discovery)
+                    raise flow.DeviceError(reason)
+                flow.get_hostname = lookup
+                result = self.discover_service("Printer._http._tcp.local.", "printer.local.")
+                self.assertEqual(result, {"type": "abort", "reason": "not_perinkpheral"})
+        self.assertEqual(ConfigFlow.entries, [])
+        self.assertEqual(pushes, [])
+
+    def test_discovery_hostname_must_match_status_before_binding_a_legacy_ip(self):
+        entry = types.SimpleNamespace(unique_id=None, data={"device": "192.0.2.42", "secret": "keep"})
+        ConfigFlow.entries.append(entry)
+        hostnames["192.0.2.42"] = "other"
+        result = self.discover_service("Kitchen._http._tcp.local.", "kitchen.local.")
+        self.assertEqual(result, {"type": "abort", "reason": "not_perinkpheral"})
+        self.assertIsNone(entry.unique_id)
+        self.assertEqual(entry.data, {"device": "192.0.2.42", "secret": "keep"})
+        self.assertEqual(pushes, [])
 
     def test_ip_and_hostname_aliases_do_not_replace_pairing(self):
         hostnames["192.0.2.42"] = "display"
@@ -456,10 +540,12 @@ module("homeassistant.components.http", HomeAssistantView=object)
 device = load("device")
 load("render")
 view = load("view")
+module("homeassistant.const", Platform=types.SimpleNamespace(SENSOR="sensor", BUTTON="button"))
+integration = load("__init__")
 
 
 class IdentityTransportTests(unittest.TestCase):
-    def lookup(self, address, *, status=200, payload=None, failure=None):
+    def lookup(self, address, *, status=200, payload=None, failure=None, discovery=False):
         class Answer:
             async def __aenter__(self):
                 return self
@@ -479,7 +565,7 @@ class IdentityTransportTests(unittest.TestCase):
             calls.append(url)
             return answer
         hass = types.SimpleNamespace(session=types.SimpleNamespace(get=get))
-        result = asyncio.run(device.get_hostname(hass, address))
+        result = asyncio.run(device.get_hostname(hass, address, discovery=discovery))
         return result, calls
 
     def test_reads_canonical_hostname_using_the_given_address(self):
@@ -508,6 +594,110 @@ class IdentityTransportTests(unittest.TestCase):
             with self.subTest(failure=type(failure).__name__):
                 with self.assertRaisesRegex(device.DeviceError, "cannot_connect"):
                     self.lookup("display", failure=failure)
+
+    def test_discovery_requires_the_firmware_status_format(self):
+        payload = {"hostname": "kitchen", "firmware": "0.1.30", "mode": "application",
+                   "ota_protocol": 1, "supported_abis": [3]}
+        self.assertEqual(self.lookup("192.0.2.42", payload=payload, discovery=True)[0], "kitchen")
+        for key in payload.keys() - {"hostname"}:
+            with self.subTest(missing=key):
+                incomplete = {field: value for field, value in payload.items() if field != key}
+                with self.assertRaisesRegex(device.DeviceError, "not_perinkpheral"):
+                    self.lookup("192.0.2.42", payload=incomplete, discovery=True)
+        for changed in ({"firmware": ""}, {"firmware": 42}, {"mode": "recovery"},
+                        {"ota_protocol": 2}, {"supported_abis": "3"}, {"supported_abis": [2]}):
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(device.DeviceError, "not_perinkpheral"):
+                    self.lookup("192.0.2.42", payload={**payload, **changed}, discovery=True)
+
+
+class RepeatWriteTests(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        self.payload = {"hostname": "display"}
+        self.status = 200
+        self.failure = None
+        self.entry = types.SimpleNamespace(unique_id="DISPLAY.local.", data={
+            "device": "192.0.2.42", "url": "http://ha/", "secret": "paired",
+        })
+        owner = self
+
+        class Answer:
+            status = 200
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def json(self):
+                if owner.failure:
+                    raise owner.failure
+                return owner.payload
+
+            async def read(self):
+                return b""
+
+        def get(url):
+            self.calls.append(("get", url))
+            answer = Answer()
+            answer.status = self.status
+            return answer
+
+        def post(url, **kwargs):
+            self.calls.append(("post", url, kwargs))
+            return Answer()
+
+        self.hass = types.SimpleNamespace(session=types.SimpleNamespace(get=get, post=post))
+
+    def tell(self):
+        return asyncio.run(integration.tell_the_display(self.hass, self.entry))
+
+    def test_matching_identity_is_read_before_the_secret_is_written(self):
+        for hostname in ("display", " display.local. ", "DISPLAY.local"):
+            with self.subTest(hostname=hostname):
+                self.calls.clear()
+                self.payload = {"hostname": hostname}
+                self.assertTrue(self.tell())
+                self.assertEqual(self.calls, [
+                    ("get", "http://192.0.2.42/api/status"),
+                    ("post", "http://192.0.2.42/api/apps/settings?app=ha",
+                     {"json": {"server": "http://ha", "token": "paired"}}),
+                ])
+
+    def test_reassigned_ip_never_receives_pairing_credentials(self):
+        self.payload = {"hostname": "other-display"}
+        with self.assertLogs(integration.LOGGER, level="WARNING") as logs:
+            self.assertFalse(self.tell())
+        self.assertEqual(self.calls, [("get", "http://192.0.2.42/api/status")])
+        self.assertIn("identity_mismatch", logs.output[0])
+        self.assertNotIn("paired", logs.output[0])
+
+    def test_failed_identity_read_never_sends_credentials(self):
+        for status, payload, failure in (
+                (404, self.payload, None), (200, {}, None),
+                (200, None, ValueError("bad JSON")), (200, None, OSError("offline")),
+                (200, None, asyncio.TimeoutError())):
+            with self.subTest(status=status, payload=payload, failure=failure):
+                self.calls.clear()
+                self.status, self.payload, self.failure = status, payload, failure
+                with self.assertLogs(integration.LOGGER, level="WARNING"):
+                    self.assertFalse(self.tell())
+                self.assertEqual(self.calls, [("get", "http://192.0.2.42/api/status")])
+
+    def test_legacy_entry_without_identity_cannot_send_credentials(self):
+        for unique_id in (None, ""):
+            with self.subTest(unique_id=unique_id):
+                self.entry.unique_id = unique_id
+                with self.assertLogs(integration.LOGGER, level="WARNING"):
+                    self.assertFalse(self.tell())
+        self.assertEqual(self.calls, [])
+
+    def test_entry_without_device_does_not_read_or_write(self):
+        self.entry.data.pop("device")
+        self.assertFalse(self.tell())
+        self.assertEqual(self.calls, [])
 
 
 class ScreenViewTests(unittest.TestCase):
