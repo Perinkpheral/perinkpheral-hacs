@@ -31,5 +31,6 @@ class RefreshButton(ButtonEntity):
             if not await tell_the_display(self.hass, self._entry, raise_on_error=True):
                 raise DeviceError("cannot_connect")
         except DeviceError as failure:
-            reason = "identity_mismatch" if str(failure) == "identity_mismatch" else "cannot_connect"
+            reason = {"identity_mismatch": "identity_mismatch", "identity_missing": "identity_mismatch",
+                      "app_missing": "app_missing", "refused": "refused"}.get(str(failure), "cannot_connect")
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key=reason) from failure

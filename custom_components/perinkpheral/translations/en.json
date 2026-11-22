@@ -168,6 +168,12 @@
     },
     "identity_mismatch": {
       "message": "A different or renamed display is at this address. Pair it again."
+    },
+    "app_missing": {
+      "message": "HA Companion is not installed on the display."
+    },
+    "refused": {
+      "message": "The display refused the settings."
     }
   }
 }
