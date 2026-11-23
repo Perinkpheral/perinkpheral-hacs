@@ -45,7 +45,8 @@ describes the screen format rendered by this integration.
 
 HA Companion requests `/api/perinkpheral/screen?page=<n>` (1-based, default 1).
 The reply starts with `page|<actual>|<count>`, with up to four screens; a page past
-the end returns the last screen. Only that screen's entities are read. Existing
+the end returns the last screen, one below 1 the first, and a page that is not a number
+is refused with 400. Only that screen's entities are read. Existing
 applications ignore the new line. The text sensor continues to expose screen 1
 without the page line. Replies, including the header, fit in 512 UTF-8 bytes.
 
