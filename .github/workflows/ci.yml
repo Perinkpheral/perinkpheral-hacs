@@ -33,10 +33,13 @@ jobs:
         run: python3 tests/test_render.py
       - name: Pairing
         run: python3 tests/test_config_flow.py
-      - name: Install Home Assistant test dependencies
-        run: python -m pip install -r requirements_test.txt
       - name: Home Assistant integration tests
-        run: python -m pytest tests_ha -q
+        run: |
+          test_venv=$(mktemp -d "${RUNNER_TEMP}/perinkpheral-ha.XXXXXX")
+          trap 'rm -rf "$test_venv"' EXIT
+          python -m venv "$test_venv"
+          "$test_venv/bin/python" -m pip install -r requirements_test.txt
+          "$test_venv/bin/python" -m pytest tests_ha -q
       - name: hassfest
         uses: home-assistant/actions/hassfest@master
 

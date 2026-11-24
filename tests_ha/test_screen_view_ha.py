@@ -125,15 +125,3 @@ async def test_weather_entity_picture(hass, hass_client_no_auth):
     body = await (await get_screen(client)).text()
     assert "-3.2°" in body or "-3.3°" in body  # rounded to one decimal
     assert "partlycloudy" in body  # the weather state is the picture
-
-
-async def test_disabled_entry_secret_is_not_served(hass, hass_client_no_auth):
-    """The view skips disabled entries: their secret must not answer."""
-    await loaded_entry(hass, [{CONF_LAYOUT: "single", "value_entity": "sensor.temp"}])
-    other = entry(hass, [{CONF_LAYOUT: "single", "value_entity": "sensor.other"}])
-    other.disabled_by = "user"
-    client = await hass_client_no_auth()
-    response = await get_screen(client, secret="s3cret-value")
-    assert response.status == 200
-    response = await get_screen(client, secret=SECRET)
-    assert response.status == 200

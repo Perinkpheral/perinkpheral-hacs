@@ -62,13 +62,13 @@ this repository owns the Home Assistant component. The device API is documented 
 ## Development
 
 Rendering and pairing tests require Python 3.11 or later and run without Home Assistant.
-CI uses Python 3.13. The integration tests also run in a local Home Assistant
+The integration tests require Python 3.13 and run in a local Home Assistant
 instance, with a fake display on loopback; they require the dependencies below.
 
 ```sh
 python3 tests/test_render.py
 python3 tests/test_config_flow.py
-python3 -m venv .venv
+python3.13 -m venv .venv
 .venv/bin/pip install -r requirements_test.txt
 .venv/bin/python -m pytest tests_ha -q
 ```
