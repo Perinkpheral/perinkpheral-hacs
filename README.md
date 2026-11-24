@@ -62,18 +62,23 @@ this repository owns the Home Assistant component. The device API is documented 
 ## Development
 
 Rendering and pairing tests require Python 3.11 or later and run without Home Assistant.
-CI uses Python 3.13.
+CI uses Python 3.13. The integration tests also run in a local Home Assistant
+instance, with a fake display on loopback; they require the dependencies below.
 
 ```sh
 python3 tests/test_render.py
 python3 tests/test_config_flow.py
+python3 -m venv .venv
+.venv/bin/pip install -r requirements_test.txt
+.venv/bin/python -m pytest tests_ha -q
 ```
 
 - `custom_components/perinkpheral/` - integration, configuration flow and screen rendering.
 - `tests/` - rendering and pairing tests.
+- `tests_ha/` - Home Assistant flow, HTTP view and device integration tests.
 - `hacs.json` - HACS package configuration.
 
-CI runs rendering and pairing tests, hassfest and HACS validation on every push.
+CI runs rendering, pairing and Home Assistant integration tests, hassfest and HACS validation on every push.
 Each successful push to `main` releases `perinkpheral.zip` for HACS.
 
 ## License
