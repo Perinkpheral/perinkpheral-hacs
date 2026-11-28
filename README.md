@@ -53,8 +53,10 @@ without the page line. Replies, including the header, fit in 512 UTF-8 bytes.
 Screen settings are stored in `entry.options["screens"]` as a list of dictionaries,
 each containing `layout` and its place settings. Older flat options are read as one
 screen and converted to the list form when options are next saved, retaining
-settings from other layouts. On the display, UP and DOWN wrap between screens;
-OK refreshes the current screen. Holding UP or DOWN scrolls a list.
+settings from other layouts. On the display, held UP or DOWN switches screens,
+wrapping at the ends. Short presses also switch screens outside lists. In a list,
+short presses scroll and stop at the ends; held presses scroll when there is only
+one screen. OK refreshes the current screen.
 Application code belongs in [perinkpheral-apps](https://github.com/perinkpheral/perinkpheral-apps);
 this repository owns the Home Assistant component. The device API is documented in
 [the firmware repository](https://github.com/Perinkpheral/perinkpheral-os/blob/main/docs/api/openapi.yaml).

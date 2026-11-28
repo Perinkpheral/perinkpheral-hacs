@@ -8,13 +8,13 @@ next.
 
 The tests in `tests/` run the integration against stubs of Home Assistant. Stubs do not
 check what Home Assistant checks. Release 0.4.0 shipped an options menu whose step had no
-method: Home Assistant refused it with `UnknownStep`, the stubs did not. This plan adds
-tests that run inside a real Home Assistant.
+method: Home Assistant refused it with `UnknownStep`, the stubs did not. The existing
+`tests_ha/` suite runs inside a real Home Assistant. This plan extends that suite.
 
 ## Rules
 
-- Do not change `custom_components/perinkpheral/`. You may add files under
-  `tests_ha/` and a `requirements_test.txt` only.
+- Do not change `custom_components/perinkpheral/`. Changes are limited to
+  `tests_ha/` and the existing `requirements_test.txt`.
 - Do not commit, push, tag or open pull requests.
 - Do not contact any real Home Assistant, device or router. Everything runs locally.
 - Do not fix a bug you find. Report it.
@@ -44,7 +44,7 @@ before any task, and check each with the command after it:
 - wasi-sdk 34 from https://github.com/WebAssembly/wasi-sdk/releases (the archive for this
   computer's system and processor). Unpack it and `export WASI_SDK_PATH=<its folder>`.
   Check: `$WASI_SDK_PATH/bin/clang --version`.
-- Python 3.12 or later: `python3 --version`.
+- Python 3.13: `python3.13 --version`.
 - Node.js 22 and npm: `node --version`.
 - ffmpeg: `ffmpeg -version`.
 - Optional, for checks that match the Linux CI: Docker with the `gcc:14` image.
@@ -70,12 +70,19 @@ stop: do not change the repository to make it pass.
 
 ## Setup
 
-1. Make a virtual environment with the Python version Home Assistant's current release
-   needs. Install `pytest-homeassistant-custom-component` pinned to the version that
-   matches the Home Assistant release named in `hacs.json` or the newest stable one.
-2. Write `tests_ha/conftest.py` that enables custom integrations
-   (`enable_custom_integrations` fixture).
-3. `python -m pytest tests_ha -q` must run, with zero tests, before you start Task 1.
+1. Use Python 3.13, as in `.github/workflows/ci.yml`. Create a virtual environment
+   and install the checked-in dependency pins:
+
+   ```sh
+   python3.13 -m venv .venv
+   .venv/bin/python -m pip install -r requirements_test.txt
+   .venv/bin/python -m pytest tests_ha -q
+   ```
+
+2. Run the existing suite as the baseline before Task 1. Record its result;
+   report failures before adding tests.
+3. Extend the existing tests and `tests_ha/conftest.py`. Its autouse fixture already
+   enables `enable_custom_integrations`. Keep device calls mocked or on loopback.
 
 ## Task 1. Config flow
 
